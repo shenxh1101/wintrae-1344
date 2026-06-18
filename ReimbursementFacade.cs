@@ -328,6 +328,13 @@ namespace FinanceReimbursement
             _invoiceRepository.MarkInvoicesAsUsed(nos, form.FormNo, form.DepartmentId);
         }
 
+        public void RollbackInvoices(ReimbursementForm form)
+        {
+            if (_invoiceRepository == null || form == null) return;
+            var nos = form.GetAllInvoiceNos();
+            _invoiceRepository.UnmarkInvoices(nos);
+        }
+
         public bool TryOccupyBudget(ReimbursementForm form, out string message)
         {
             message = "";
@@ -370,6 +377,21 @@ namespace FinanceReimbursement
         public List<RuleScheme> GetAllRuleSchemes() => _ruleProvider?.GetAllSchemes() ?? new List<RuleScheme>();
 
         public void AddRuleScheme(RuleScheme scheme) => _ruleProvider?.AddScheme(scheme);
+
+        public List<RuleScheme> GetEffectiveRuleSchemes(DateTime? atDate = null)
+            => _ruleProvider?.GetEffectiveSchemes(atDate) ?? new List<RuleScheme>();
+
+        public RuleSchemeSnapshot CaptureRuleSnapshot(string schemeId)
+            => _ruleProvider?.CaptureRuleSnapshot(schemeId) ?? new RuleSchemeSnapshot();
+
+        public RuleSchemeSnapshot CaptureResolvedSnapshot(Employee employee, string cityCode = "")
+            => _ruleProvider?.CaptureResolvedSnapshot(employee, cityCode) ?? new RuleSchemeSnapshot();
+
+        public void RecordFormRule(string formNo, RuleSchemeSnapshot snapshot)
+            => _ruleProvider?.RecordFormRule(formNo, snapshot);
+
+        public List<RuleSchemeSnapshot> GetRuleSnapshots(string formNo)
+            => _ruleProvider?.GetSnapshots(formNo) ?? new List<RuleSchemeSnapshot>();
 
         #endregion
 

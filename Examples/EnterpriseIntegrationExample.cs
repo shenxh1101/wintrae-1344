@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using FinanceReimbursement;
+using FinanceReimbursement.Adapters;
 using FinanceReimbursement.Models;
 using FinanceReimbursement.Repositories;
 using FinanceReimbursement.Rules;
+using FinanceReimbursement.Services;
 
 namespace FinanceReimbursement.Examples
 {
@@ -13,13 +15,21 @@ namespace FinanceReimbursement.Examples
         {
             Console.WriteLine("=== 企业级报销类库 - 完整接入演示 ===\n");
 
-            // ========== 1. 初始化：仓储 + 规则方案 ==========
-            Console.WriteLine("【步骤1】初始化仓储与规则方案\n");
+            RunInitAndBasicFlow();
+            RunSubmitReturnResubmitFlow();
+            RunImportExportFlow();
+            RunRuleVersionAndAuditFlow();
+        }
+
+        private static void RunInitAndBasicFlow()
+        {
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            Console.WriteLine("  Part 1: 初始化 + 基础流程");
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
             var invoiceRepo = new InMemoryInvoiceRepository(new[]
             {
-                new UsedInvoiceRecord { InvoiceNo = "HIST-001", FormNo = "BX-OLD-001", DepartmentId = "D001" },
-                new UsedInvoiceRecord { InvoiceNo = "HIST-002", FormNo = "BX-OLD-002", DepartmentId = "D001" }
+                new UsedInvoiceRecord { InvoiceNo = "HIST-001", FormNo = "BX-OLD-001", DepartmentId = "D001" }
             });
 
             var budgetRepo = new InMemoryBudgetRepository(new[]
@@ -30,7 +40,8 @@ namespace FinanceReimbursement.Examples
 
             var ruleManager = new RuleSchemeManager();
             ruleManager.AddScheme(RuleScheme.CreateDefault("ACME", "ACME集团"));
-            var salesScheme = RuleScheme.CreateForDepartment("D001", "销售部", "ACME", "ACME集团");
+            var salesScheme = RuleScheme.CreateForDepartment("D001", "销售部", "ACME", "ACME集团",
+                parentOrgId: "ACME", orgPath: "/ACME/D001");
             salesScheme.ProjectTypeRiskRule.ProjectTypeConfigs["COMMERCIAL"] = new ProjectTypeApprovalConfig
             {
                 ProjectTypeName = "商业项目",
@@ -43,14 +54,11 @@ namespace FinanceReimbursement.Examples
 
             var facade = new ReimbursementFacade(ruleManager, invoiceRepo, budgetRepo);
 
-            Console.WriteLine($"  发票仓储: 已有 {invoiceRepo.GetUsedInvoiceCount()} 张历史发票");
+            Console.WriteLine($"  发票仓储: {invoiceRepo.GetUsedInvoiceCount()} 张历史发票");
             Console.WriteLine($"  规则方案: {facade.GetAllRuleSchemes().Count} 套");
             foreach (var s in facade.GetAllRuleSchemes())
-                Console.WriteLine($"    - [{s.Id}] {s.Name} (优先级:{s.Priority})");
+                Console.WriteLine($"    [{s.Id}] {s.Name} V{s.Version} (优先级:{s.Priority}, 路径:{s.OrgPath})");
             Console.WriteLine();
-
-            // ========== 2. 创建报销单 ==========
-            Console.WriteLine("【步骤2】创建报销单并填写内容\n");
 
             var emp = new Employee
             {
@@ -78,139 +86,296 @@ namespace FinanceReimbursement.Examples
             facade.AddExpense(form, ExpenseCategory.Meal,
                 500m, 30m, "出差餐饮", new DateTime(2026, 6, 16), trip.Id);
 
-            Console.WriteLine($"  报销单: {form.FormNo}");
-            Console.WriteLine($"  费用合计: ¥{form.SubtotalAmount:N2}");
-            Console.WriteLine();
-
-            // ========== 3. 自动解析规则方案 ==========
-            Console.WriteLine("【步骤3】自动解析适用规则方案\n");
-
             var rule = facade.ResolveRule(emp);
-            Console.WriteLine($"  适配方案: [{rule.Id}] {rule.Name}");
-            Console.WriteLine($"  住宿标准(经理/一线): ¥{rule.Standard.AccommodationStandard[EmployeeLevel.Manager][CityLevel.Tier1]}/晚");
-            Console.WriteLine();
-
-            // ========== 4. 计算补贴 + 校验 + 增强审批 ==========
-            Console.WriteLine("【步骤4】增强模式：补贴+校验+多因子审批\n");
-
             var result = facade.ProcessFullEnhanced(form, rule, projectType: "COMMERCIAL");
 
-            Console.WriteLine($"  补贴: ¥{form.SubsidyAmount:N2}，扣减: ¥{form.DeductionAmount:N2}");
+            Console.WriteLine($"  报销单: {form.FormNo}");
             Console.WriteLine($"  总额: ¥{form.TotalAmount:N2} = {result.ChineseAmount}");
+            Console.WriteLine($"  校验: {(result.Validation?.IsValid == true ? "✅" : "❌")}");
+            Console.WriteLine($"  审批风险: {result.ApprovalRecommendation?.RiskLevel}, {result.ApprovalRecommendation?.TotalNodes}个节点");
             Console.WriteLine();
-            Console.WriteLine($"  校验: {(result.Validation?.IsValid == true ? "✅ 通过" : "❌ 不通过")}");
-            if (result.Validation != null && result.Validation.Messages.Count > 0)
+        }
+
+        private static void RunSubmitReturnResubmitFlow()
+        {
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            Console.WriteLine("  Part 2: 提交 → 退回 → 释放 → 重新提交");
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+            var invoiceRepo = new InMemoryInvoiceRepository();
+            var budgetRepo = new InMemoryBudgetRepository(new[]
             {
-                foreach (var m in result.Validation.GetDisplayMessages())
-                    Console.WriteLine($"    {m}");
-            }
-            Console.WriteLine();
-            Console.WriteLine($"  审批风险等级: {result.ApprovalRecommendation?.RiskLevel}");
-            Console.WriteLine($"  审批节点 ({result.ApprovalRecommendation?.TotalNodes}个):");
-            if (result.ApprovalRecommendation != null)
+                new Budget { DepartmentId = "D001", DepartmentName = "销售部", Year = 2026, TotalBudget = 10000m, UsedBudget = 0 }
+            });
+            var facade = new ReimbursementFacade(new RuleSchemeManager(), invoiceRepo, budgetRepo);
+
+            var emp = new Employee
             {
-                foreach (var n in result.ApprovalRecommendation.Nodes)
-                    Console.WriteLine($"    {n.Order}. {n.NodeName} — {n.RuleDescription}");
-                Console.WriteLine("  审批理由:");
-                foreach (var r in result.ApprovalRecommendation.Reasons)
-                    Console.WriteLine($"    [{r.Factor}] {r.Description} → {r.Impact}");
-            }
-            Console.WriteLine();
-
-            // ========== 5. 仓储操作：预算占用 + 发票提交 ==========
-            Console.WriteLine("【步骤5】仓储操作：预算占用与发票提交\n");
-
-            if (facade.TryOccupyBudget(form, out string budgetMsg))
-            {
-                Console.WriteLine($"  ✅ 预算占用成功: {budgetMsg}");
-            }
-            else
-            {
-                Console.WriteLine($"  ❌ 预算占用失败: {budgetMsg}");
-            }
-
-            facade.CommitInvoices(form);
-            Console.WriteLine($"  发票已提交: {form.GetInvoiceCount()} 张");
-            Console.WriteLine($"  发票仓储当前记录: {invoiceRepo.GetUsedInvoiceCount()} 张");
-            Console.WriteLine();
-
-            var budgetSummary = facade.GetBudgetOccupation("D001");
-            Console.WriteLine($"  销售部预算概况: 总额 ¥{budgetSummary.TotalBudget:N2}，已占用 ¥{budgetSummary.TotalOccupied:N2}，可用 ¥{budgetSummary.TotalAvailable:N2}");
-            Console.WriteLine();
-
-            // ========== 6. 前端视图模型 ==========
-            Console.WriteLine("【步骤6】前端视图模型（可直接序列化为JSON给前端）\n");
-
-            var vm = result.PrintViewModel;
-            Console.WriteLine($"  表头: {vm.Header.FormNo} / {vm.Header.ApplicantName} ({vm.Header.DepartmentName})");
-            Console.WriteLine($"  费用行数: {vm.ExpenseTable.TotalRows}");
-            Console.WriteLine($"  发票行数: {vm.InvoiceTable.TotalCount}");
-            Console.WriteLine($"  金额: {vm.Amount.TotalAmount} = {vm.Amount.TotalAmountChinese}");
-            Console.WriteLine($"  校验: {vm.Validation.SummaryText}");
-            Console.WriteLine($"  审批风险: {vm.Approval.RiskLevel} ({vm.Approval.TotalNodes}个节点)");
-            Console.WriteLine($"  审批理由: {vm.Approval.Reasons.Count}条");
-            foreach (var r in vm.Approval.Reasons)
-                Console.WriteLine($"    [{r.Factor}] {r.Impact}");
-            Console.WriteLine();
-
-            // ========== 7. 批量处理 ==========
-            Console.WriteLine("【步骤7】批量处理多张报销单\n");
-
-            var batchForms = new List<ReimbursementForm> { form };
-
-            var emp2 = new Employee
-            {
-                Id = "E002", Name = "王芳",
-                DepartmentId = "D002", DepartmentName = "研发部",
+                Id = "E100", Name = "张三",
+                DepartmentId = "D001", DepartmentName = "销售部",
                 Level = EmployeeLevel.Supervisor
             };
-            var form2 = facade.CreateForm(emp2, "深圳技术交流差旅报销");
-            var trip2 = facade.AddTrip(form2, "深圳", "深圳市",
-                new DateTime(2026, 6, 20), new DateTime(2026, 6, 22), CityLevel.Tier1);
-            var hotel2 = facade.AddExpense(form2, ExpenseCategory.Accommodation,
-                1200m, 72m, "酒店2晚", tripId: trip2.Id);
-            facade.AddInvoice(hotel2, "BATCH-HT-001", InvoiceType.VATSpecial,
-                1200m, 72m, sellerName: "深圳酒店", isVerified: true);
-            facade.AddExpense(form2, ExpenseCategory.Transportation,
-                1500m, 0m, "机票", tripId: trip2.Id);
-            batchForms.Add(form2);
 
-            var emp3 = new Employee
+            // ---- 第一次提交 ----
+            Console.WriteLine("▶ 第一次提交:");
+            var form = facade.CreateForm(emp, "深圳出差报销");
+            var trip = facade.AddTrip(form, "深圳", "深圳市",
+                new DateTime(2026, 7, 1), new DateTime(2026, 7, 3), CityLevel.Tier1);
+            var hotel = facade.AddExpense(form, ExpenseCategory.Accommodation,
+                2400m, 144m, "酒店2晚", tripId: trip.Id);
+            facade.AddInvoice(hotel, "FLOW-HT-001", InvoiceType.VATSpecial,
+                2400m, 144m, sellerName: "深圳酒店", isVerified: true);
+            facade.AddExpense(form, ExpenseCategory.Transportation,
+                2000m, 0m, "机票", tripId: trip.Id);
+
+            var rule = facade.ResolveRule(emp);
+            var result = facade.ProcessFullEnhanced(form, rule);
+
+            Console.WriteLine($"    金额: ¥{form.TotalAmount:N2}");
+
+            bool budgetOk = facade.TryOccupyBudget(form, out string budgetMsg);
+            Console.WriteLine($"    预算占用: {(budgetOk ? "✅ " + budgetMsg : "❌ " + budgetMsg)}");
+
+            facade.CommitInvoices(form);
+            Console.WriteLine($"    发票已提交: 发票仓储共 {invoiceRepo.GetUsedInvoiceCount()} 张");
+            Console.WriteLine($"    发票 FLOW-HT-001 已占用: {invoiceRepo.IsInvoiceUsed("FLOW-HT-001")}");
+
+            var bs1 = facade.GetBudgetOccupation("D001");
+            Console.WriteLine($"    销售部预算: 总额 ¥{bs1.TotalBudget:N2}, 已占用 ¥{bs1.TotalOccupied:N2}, 可用 ¥{bs1.TotalAvailable:N2}");
+            Console.WriteLine();
+
+            // ---- 退回 ----
+            Console.WriteLine("▶ 审批退回（需修改发票）:");
+            facade.ReleaseBudget(form.FormNo);
+            Console.WriteLine($"    预算已释放");
+
+            facade.RollbackInvoices(form);
+            Console.WriteLine($"    发票已回退: FLOW-HT-001 已占用={invoiceRepo.IsInvoiceUsed("FLOW-HT-001")}");
+
+            var bs2 = facade.GetBudgetOccupation("D001");
+            Console.WriteLine($"    销售部预算: 总额 ¥{bs2.TotalBudget:N2}, 已占用 ¥{bs2.TotalOccupied:N2}, 可用 ¥{bs2.TotalAvailable:N2}");
+            Console.WriteLine();
+
+            // ---- 修改后重新提交 ----
+            Console.WriteLine("▶ 修改后重新提交:");
+            form.ExpenseItems[0].Invoices[0].Amount = 2400m;
+            form.ExpenseItems[0].Invoices[0].IsVerified = true;
+
+            var result2 = facade.ProcessFullEnhanced(form, rule);
+
+            bool budgetOk2 = facade.TryOccupyBudget(form, out string budgetMsg2);
+            Console.WriteLine($"    预算占用: {(budgetOk2 ? "✅ " + budgetMsg2 : "❌ " + budgetMsg2)}");
+
+            facade.CommitInvoices(form);
+            Console.WriteLine($"    发票已重新提交: FLOW-HT-001 已占用={invoiceRepo.IsInvoiceUsed("FLOW-HT-001")}");
+
+            var bs3 = facade.GetBudgetOccupation("D001");
+            Console.WriteLine($"    销售部预算: 总额 ¥{bs3.TotalBudget:N2}, 已占用 ¥{bs3.TotalOccupied:N2}, 可用 ¥{bs3.TotalAvailable:N2}");
+            Console.WriteLine();
+
+            Console.WriteLine($"    ✅ 发票占用和预算占用在退回后均正确释放，重新提交后正确恢复");
+            Console.WriteLine();
+        }
+
+        private static void RunImportExportFlow()
+        {
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            Console.WriteLine("  Part 3: 导入导出适配能力");
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+            var facade = new ReimbursementFacade();
+
+            // ---- JSON 导出 ----
+            Console.WriteLine("▶ 单据JSON导出:");
+            var emp = new Employee { Id = "E200", Name = "测试员工", DepartmentId = "D002", DepartmentName = "研发部", Level = EmployeeLevel.Senior };
+            var form = facade.CreateForm(emp, "导入导出测试");
+            facade.AddExpense(form, ExpenseCategory.Office, 3000m, 180m, "办公用品");
+
+            var json = JsonAdapter.ExportForm(form);
+            Console.WriteLine($"    导出JSON长度: {json.Length} 字符");
+            Console.WriteLine($"    前100字: {json.Substring(0, Math.Min(100, json.Length))}...");
+            Console.WriteLine();
+
+            // ---- 字典导入 ----
+            Console.WriteLine("▶ 从字典导入报销单:");
+            var importData = new Dictionary<string, object>
             {
-                Id = "E003", Name = "赵六",
-                DepartmentId = "D001", DepartmentName = "销售部",
-                Level = EmployeeLevel.Junior
+                ["formNo"] = "IMP-001",
+                ["title"] = "外部系统导入报销单",
+                ["reimbursementType"] = "差旅费",
+                ["applicant"] = new Dictionary<string, object>
+                {
+                    ["id"] = "E300",
+                    ["name"] = "导入员工",
+                    ["departmentId"] = "D003",
+                    ["departmentName"] = "市场部",
+                    ["level"] = "主管"
+                },
+                ["expenseItems"] = new List<Dictionary<string, object>>
+                {
+                    new Dictionary<string, object>
+                    {
+                        ["category"] = "交通费",
+                        ["description"] = "出租车",
+                        ["amount"] = "500",
+                        ["taxAmount"] = "30",
+                        ["invoices"] = new List<Dictionary<string, object>>
+                        {
+                            new Dictionary<string, object>
+                            {
+                                ["invoiceNo"] = "IMP-INV-001",
+                                ["type"] = "电子发票",
+                                ["amount"] = "500",
+                                ["taxAmount"] = "30",
+                                ["sellerName"] = "滴滴出行"
+                            }
+                        }
+                    },
+                    new Dictionary<string, object>
+                    {
+                        ["category"] = "住宿费",
+                        ["description"] = "酒店",
+                        ["amount"] = "1200",
+                        ["taxAmount"] = "72"
+                    }
+                }
             };
-            var form3 = facade.CreateForm(emp3, "北京会议报销");
-            facade.AddExpense(form3, ExpenseCategory.Conference,
-                6000m, 360m, "会议场地费");
-            batchForms.Add(form3);
 
-            var batchResult = facade.ProcessBatch(batchForms, rule,
-                usedInvoiceNos: invoiceRepo.GetUsedInvoiceNos(),
-                budgetSummary: budgetSummary,
-                projectType: "COMMERCIAL");
-
-            Console.WriteLine($"  批量处理: 共{batchResult.TotalCount}张");
-            Console.WriteLine($"  {batchResult.GetSummaryText()}");
+            var importedForm = JsonAdapter.ImportFromDictionary(importData);
+            Console.WriteLine($"    导入单号: {importedForm.FormNo}");
+            Console.WriteLine($"    申请人: {importedForm.Applicant?.Name} ({importedForm.Applicant?.Level.GetDescription()})");
+            Console.WriteLine($"    费用项: {importedForm.ExpenseItems.Count}项");
+            Console.WriteLine($"    有发票项: {importedForm.ExpenseItems.FindAll(e => e.Invoices.Count > 0).Count}项");
             Console.WriteLine();
 
-            Console.WriteLine("  各单结果:");
-            foreach (var bi in batchResult.Items)
+            // ---- 表格导入 ----
+            Console.WriteLine("▶ 从表格结构导入（Excel/CSV映射）:");
+            var tableRows = new List<Dictionary<string, string>>
             {
-                var status = bi.IsValid ? "✅" : "❌";
-                Console.WriteLine($"    {status} {bi.FormNo} - {bi.ApplicantName} " +
-                                  $"¥{bi.TotalAmount:N2} {bi.ChineseAmount}");
-            }
+                new Dictionary<string, string>
+                {
+                    ["formNo"] = "TBL-001",
+                    ["费用类别"] = "交通费",
+                    ["描述"] = "地铁公交",
+                    ["金额"] = "200",
+                    ["税额"] = "12",
+                    ["发票号"] = "TBL-INV-001",
+                    ["发票类型"] = "电子发票",
+                    ["开票方"] = "北京地铁"
+                },
+                new Dictionary<string, string>
+                {
+                    ["formNo"] = "TBL-001",
+                    ["费用类别"] = "餐饮费",
+                    ["描述"] = "工作餐",
+                    ["金额"] = "150",
+                    ["税额"] = "9"
+                }
+            };
+
+            var importedDicts = JsonAdapter.ImportFromTable(tableRows,
+                applicant: new Employee { Id = "E400", Name = "表格员工", DepartmentId = "D001", DepartmentName = "销售部", Level = EmployeeLevel.Junior });
+            Console.WriteLine($"    表格行: {tableRows.Count}行 → 报销单: {importedDicts.Count}张");
             Console.WriteLine();
 
-            Console.WriteLine("  部门汇总:");
-            foreach (var kv in batchResult.DepartmentSummary)
+            // ---- 统一结果包导出 ----
+            Console.WriteLine("▶ 统一结果包导出:");
+            var processedForms = new List<ReimbursementForm> { form, importedForm };
+            var results = new List<EnhancedProcessResult>();
+            var appliedRules = new List<RuleScheme>();
+            foreach (var f in processedForms)
             {
-                Console.WriteLine($"    {kv.Key}: {kv.Value.FormCount}张, 合计¥{kv.Value.TotalAmount:N2}, 不通过{kv.Value.InvalidCount}张");
+                var r = facade.ResolveRule(f.Applicant);
+                results.Add(facade.ProcessFullEnhanced(f, r));
+                appliedRules.Add(r);
             }
 
-            Console.WriteLine("\n=== 企业级接入演示完毕 ===");
+            var pkg = ResultPackageBuilder.Build(results, processedForms, appliedRules);
+            Console.WriteLine($"    结果包ID: {pkg.PackageId}");
+            Console.WriteLine($"    处理记录: {pkg.Records.Count}条");
+            Console.WriteLine($"    通过: {pkg.Summary.ValidCount}, 不通过: {pkg.Summary.InvalidCount}");
+            Console.WriteLine($"    总金额: ¥{pkg.Summary.TotalAmount:N2} = {pkg.Summary.TotalAmountChinese}");
+
+            foreach (var rec in pkg.Records)
+            {
+                Console.WriteLine($"    [{rec.FormNo}] {rec.ApplicantName} ¥{rec.TotalAmount:N2} " +
+                                  $"规则:{rec.AppliedRuleSchemeId} V{rec.AppliedRuleSchemeVersion} " +
+                                  $"风险:{rec.ApprovalRiskLevel}");
+            }
+
+            var pkgJson = pkg.ExportJson();
+            Console.WriteLine($"    导出JSON长度: {pkgJson.Length} 字符");
+            Console.WriteLine();
+        }
+
+        private static void RunRuleVersionAndAuditFlow()
+        {
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            Console.WriteLine("  Part 4: 规则版本追溯 + 审计留档文本");
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+            var ruleManager = new RuleSchemeManager();
+            ruleManager.AddScheme(RuleScheme.CreateDefault("ACME", "ACME集团"));
+
+            var v2 = RuleScheme.CreateVersioned("ACME", "2.0",
+                new DateTime(2026, 7, 1), "ACME", "ACME集团");
+            v2.Description = "2026年7月起生效的新报销标准";
+            ruleManager.AddScheme(v2);
+
+            var deptRule = RuleScheme.CreateForDepartment("D001", "销售部", "ACME", "ACME集团",
+                parentOrgId: "ACME", orgPath: "/ACME/D001");
+            ruleManager.AddScheme(deptRule);
+            ruleManager.SetActiveScheme("D001", deptRule.Id);
+
+            Console.WriteLine("▶ 当前生效规则:");
+            foreach (var s in ruleManager.GetEffectiveSchemes())
+                Console.WriteLine($"    [{s.Id}] {s.Name} V{s.Version} 生效:{s.EffectiveDate:yyyy-MM-dd} 优先级:{s.Priority}");
+            Console.WriteLine();
+
+            // ---- 规则快照追溯 ----
+            Console.WriteLine("▶ 规则快照追溯:");
+            var emp = new Employee { Id = "E500", Name = "审计员工", DepartmentId = "D001", DepartmentName = "销售部", Level = EmployeeLevel.Manager };
+            var snapshot = ruleManager.CaptureResolvedSnapshot(emp);
+            Console.WriteLine($"    快照: {snapshot}");
+            Console.WriteLine($"    方案ID: {snapshot.SchemeId}, 版本: {snapshot.Version}");
+            Console.WriteLine($"    组织路径: {snapshot.OrgPath}, 抓取时间: {snapshot.CapturedAt:yyyy-MM-dd HH:mm:ss}");
+
+            ruleManager.RecordFormRule("BX-AUDIT-001", snapshot);
+            var history = ruleManager.GetSnapshots("BX-AUDIT-001");
+            Console.WriteLine($"    报销单 BX-AUDIT-001 关联规则快照: {history.Count}条");
+            Console.WriteLine();
+
+            // ---- 审计留档文本 ----
+            Console.WriteLine("▶ 审计留档文本:");
+            var facade = new ReimbursementFacade(ruleManager);
+            var form = facade.CreateForm(emp, "审计留档测试报销单");
+            facade.AddExpense(form, ExpenseCategory.Entertainment, 15000m, 900m, "客户招待");
+            var rule = facade.ResolveRule(emp);
+            var result = facade.ProcessFullEnhanced(form, rule, projectType: "GOVERNMENT");
+
+            var budgetSummary = new BudgetOccupationSummary
+            {
+                DepartmentId = "D001",
+                DepartmentName = "销售部",
+                TotalBudget = 50000m,
+                TotalOccupied = 42000m
+            };
+
+            var auditText = AuditTextGenerator.Generate(form,
+                result.ApprovalRecommendation,
+                result.Validation,
+                budgetSummary,
+                projectType: "GOVERNMENT",
+                ruleSnapshot: snapshot);
+
+            Console.WriteLine("    ┌──────────────────────────────────────────────");
+            foreach (var line in auditText.Split('\n'))
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                    Console.WriteLine($"    │ {line.TrimEnd()}");
+            }
+            Console.WriteLine("    └──────────────────────────────────────────────");
+            Console.WriteLine();
         }
     }
 }

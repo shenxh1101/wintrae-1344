@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using FinanceReimbursement.Models;
 
 namespace FinanceReimbursement.Rules
@@ -15,6 +16,10 @@ namespace FinanceReimbursement.Rules
         public string CompanyId { get; set; } = string.Empty;
 
         public string CompanyName { get; set; } = string.Empty;
+
+        public string ParentOrgId { get; set; } = string.Empty;
+
+        public string OrgPath { get; set; } = string.Empty;
 
         public string Version { get; set; } = "1.0";
 
@@ -32,6 +37,8 @@ namespace FinanceReimbursement.Rules
 
         public EmployeeLevel? MaxLevel { get; set; }
 
+        public int Priority { get; set; }
+
         public ReimbursementStandard Standard { get; set; } = new ReimbursementStandard();
 
         public ApprovalRule ApprovalRule { get; set; } = new ApprovalRule();
@@ -39,6 +46,23 @@ namespace FinanceReimbursement.Rules
         public ProjectTypeRiskRule ProjectTypeRiskRule { get; set; } = new ProjectTypeRiskRule();
 
         public InvoiceAnomalyRule InvoiceAnomalyRule { get; set; } = new InvoiceAnomalyRule();
+
+        public RuleSchemeSnapshot CaptureSnapshot()
+        {
+            return new RuleSchemeSnapshot
+            {
+                SchemeId = Id,
+                SchemeName = Name,
+                Version = Version,
+                CompanyId = CompanyId,
+                DepartmentId = DepartmentId,
+                OrgPath = OrgPath,
+                Priority = Priority,
+                EffectiveDate = EffectiveDate,
+                ExpiryDate = ExpiryDate,
+                CapturedAt = DateTime.Now
+            };
+        }
 
         public bool Matches(Employee employee, string cityCode = "")
         {
@@ -59,8 +83,6 @@ namespace FinanceReimbursement.Rules
             return true;
         }
 
-        public int Priority { get; set; }
-
         public static RuleScheme CreateDefault(string companyId = "DEFAULT",
             string companyName = "默认公司")
         {
@@ -71,6 +93,7 @@ namespace FinanceReimbursement.Rules
                 Description = "适用于所有员工的默认报销标准和审批规则",
                 CompanyId = companyId,
                 CompanyName = companyName,
+                OrgPath = $"/{companyId}",
                 Version = "1.0",
                 IsEnabled = true,
                 Priority = 0,
@@ -82,25 +105,29 @@ namespace FinanceReimbursement.Rules
         }
 
         public static RuleScheme CreateForDepartment(string deptId, string deptName,
-            string companyId = "DEFAULT", string companyName = "默认公司")
+            string companyId = "DEFAULT", string companyName = "默认公司",
+            string parentOrgId = "", string orgPath = "")
         {
             var scheme = CreateDefault(companyId, companyName);
             scheme.Id = $"DEPT_{deptId}";
             scheme.Name = $"{deptName}专属报销规则";
             scheme.Description = $"适用于{deptName}的报销标准和审批规则";
             scheme.DepartmentId = deptId;
+            scheme.ParentOrgId = parentOrgId;
+            scheme.OrgPath = string.IsNullOrWhiteSpace(orgPath) ? $"/{companyId}/{deptId}" : orgPath;
             scheme.Priority = 10;
             return scheme;
         }
 
         public static RuleScheme CreateForExecutive(string companyId = "DEFAULT",
-            string companyName = "默认公司")
+            string companyName = "默认公司", string orgPath = "")
         {
             var scheme = CreateDefault(companyId, companyName);
             scheme.Id = "EXECUTIVE";
             scheme.Name = "高管专属报销规则";
             scheme.Description = "适用于总监及以上级别的报销标准（更高限额）";
             scheme.MinLevel = EmployeeLevel.Director;
+            scheme.OrgPath = string.IsNullOrWhiteSpace(orgPath) ? $"/{companyId}/EXECUTIVE" : orgPath;
             scheme.Priority = 20;
 
             var std = scheme.Standard;
@@ -120,6 +147,37 @@ namespace FinanceReimbursement.Rules
             }
 
             return scheme;
+        }
+
+        public static RuleScheme CreateVersioned(string baseSchemeId, string newVersion,
+            DateTime effectiveDate, string companyId = "DEFAULT", string companyName = "默认公司")
+        {
+            var scheme = CreateDefault(companyId, companyName);
+            scheme.Id = $"{baseSchemeId}_V{newVersion}";
+            scheme.Name = $"报销规则V{newVersion}";
+            scheme.Version = newVersion;
+            scheme.EffectiveDate = effectiveDate;
+            scheme.Priority = 5;
+            return scheme;
+        }
+    }
+
+    public class RuleSchemeSnapshot
+    {
+        public string SchemeId { get; set; } = "";
+        public string SchemeName { get; set; } = "";
+        public string Version { get; set; } = "";
+        public string CompanyId { get; set; } = "";
+        public string DepartmentId { get; set; } = "";
+        public string OrgPath { get; set; } = "";
+        public int Priority { get; set; }
+        public DateTime EffectiveDate { get; set; }
+        public DateTime? ExpiryDate { get; set; }
+        public DateTime CapturedAt { get; set; }
+
+        public override string ToString()
+        {
+            return $"[{SchemeId}] {SchemeName} V{Version} (优先级:{Priority}, 生效:{EffectiveDate:yyyy-MM-dd})";
         }
     }
 

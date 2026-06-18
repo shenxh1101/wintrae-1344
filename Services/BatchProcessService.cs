@@ -90,7 +90,9 @@ namespace FinanceReimbursement.Services
             {
                 FormNo = form.FormNo,
                 Title = form.Title,
+                ApplicantId = form.Applicant?.Id ?? "",
                 ApplicantName = form.Applicant?.Name ?? "",
+                DepartmentId = form.Applicant?.DepartmentId ?? "",
                 DepartmentName = form.Applicant?.DepartmentName ?? "",
                 ApplicantLevel = form.Applicant?.Level ?? EmployeeLevel.Junior
             };
@@ -236,7 +238,9 @@ namespace FinanceReimbursement.Services
     {
         public string FormNo { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
+        public string ApplicantId { get; set; } = string.Empty;
         public string ApplicantName { get; set; } = string.Empty;
+        public string DepartmentId { get; set; } = string.Empty;
         public string DepartmentName { get; set; } = string.Empty;
         public EmployeeLevel ApplicantLevel { get; set; }
         public decimal TotalAmount { get; set; }

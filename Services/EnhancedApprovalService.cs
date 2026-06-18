@@ -415,6 +415,7 @@ namespace FinanceReimbursement.Services
         public string Summary { get; set; } = string.Empty;
         public int TotalNodes { get; set; }
         public string RiskLevel { get; set; } = "🟢 低风险";
+        public string AuditText { get; set; } = string.Empty;
     }
 
     public class ApprovalReason
@@ -422,5 +423,82 @@ namespace FinanceReimbursement.Services
         public string Factor { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string Impact { get; set; } = string.Empty;
+    }
+
+    public static class AuditTextGenerator
+    {
+        public static string Generate(ReimbursementForm form,
+            ApprovalRecommendation recommendation,
+            ValidationResult? validation = null,
+            BudgetOccupationSummary? budgetSummary = null,
+            string projectType = "",
+            RuleSchemeSnapshot? ruleSnapshot = null)
+        {
+            if (form == null || recommendation == null) return "";
+
+            var sb = new StringBuilder();
+
+            sb.Append($"报销单{form.FormNo}，申请人{form.Applicant?.Name ?? ""}" +
+                      $"（{form.Applicant?.DepartmentName ?? ""}，" +
+                      $"{(form.Applicant?.Level ?? EmployeeLevel.Junior).GetDescription()}），" +
+                      $"报销金额¥{form.TotalAmount:N2}（{AmountConverter.ToChineseAmount(form.TotalAmount)}）");
+
+            if (!string.IsNullOrWhiteSpace(projectType))
+                sb.Append($"，项目类型[{projectType}]");
+
+            sb.AppendLine("。");
+
+            sb.Append("审批流程判定：");
+            var factorParts = new List<string>();
+            foreach (var r in recommendation.Reasons)
+            {
+                factorParts.Add($"因{r.Description}，{r.Impact}");
+            }
+            sb.AppendLine(string.Join("；", factorParts) + "。");
+
+            sb.Append($"综合判定风险等级为{recommendation.RiskLevel}，" +
+                      $"建议审批流程共{recommendation.TotalNodes}个节点：");
+            var nodeParts = new List<string>();
+            foreach (var n in recommendation.Nodes)
+            {
+                nodeParts.Add($"第{n.Order}步{n.NodeName}（{n.RuleDescription}）");
+            }
+            sb.AppendLine(string.Join("→", nodeParts) + "。");
+
+            if (budgetSummary != null)
+            {
+                sb.Append($"预算状况：总额¥{budgetSummary.TotalBudget:N2}，" +
+                          $"已占用¥{budgetSummary.TotalOccupied:N2}，" +
+                          $"可用¥{budgetSummary.TotalAvailable:N2}");
+                if (budgetSummary.TotalBudget > 0)
+                {
+                    var rate = budgetSummary.TotalOccupied / budgetSummary.TotalBudget * 100;
+                    sb.Append($"（使用率{rate:F1}%）");
+                }
+                sb.AppendLine("。");
+            }
+
+            if (validation != null)
+            {
+                if (validation.IsValid)
+                {
+                    sb.Append($"校验结果：通过");
+                    if (validation.WarningCount > 0)
+                        sb.Append($"，存在{validation.WarningCount}个警告");
+                    sb.AppendLine("。");
+                }
+                else
+                {
+                    sb.AppendLine($"校验结果：不通过（{validation.ErrorCount}个错误，{validation.WarningCount}个警告）。");
+                }
+            }
+
+            if (ruleSnapshot != null)
+            {
+                sb.AppendLine($"适用规则：[{ruleSnapshot.SchemeId}] {ruleSnapshot.SchemeName} V{ruleSnapshot.Version}（生效日{ruleSnapshot.EffectiveDate:yyyy-MM-dd}），快照时间{ruleSnapshot.CapturedAt:yyyy-MM-dd HH:mm:ss}。");
+            }
+
+            return sb.ToString();
+        }
     }
 }
