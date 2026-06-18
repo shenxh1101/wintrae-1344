@@ -25,6 +25,11 @@ namespace FinanceReimbursement.Runner
                 Console.WriteLine("【示例 2】各类校验错误的用户友好展示");
                 Console.WriteLine("———————————————————————————————————————————————————————————\n");
                 ValidationShowcaseExample.Run();
+
+                Console.WriteLine("\n\n");
+                Console.WriteLine("【示例 3】企业级接入：仓储+规则方案+批量处理+增强审批");
+                Console.WriteLine("———————————————————————————————————————————————————————————\n");
+                EnterpriseIntegrationExample.Run();
             }
             catch (Exception ex)
             {
