@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>8.0</LangVersion>
+    <RootNamespace>FinanceReimbursement.Tests</RootNamespace>
+    <AssemblyName>FinanceReimbursement.Demo</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FinanceReimbursement.csproj" />
+  </ItemGroup>
+
+</Project>
