@@ -482,5 +482,128 @@ namespace FinanceReimbursement.Tests
             var validation = facade.ValidateInvoices(form2);
             Assert.Contains(validation.GetErrors(), m => m.Code == "INVOICE_DUPLICATE_GLOBAL");
         }
+
+        [Fact]
+        public void ValidationResult_GetDisplayText_ShouldBeUserFriendly()
+        {
+            var used = new List<string> { "DISPLAY-001" };
+            var facade = new ReimbursementFacade(usedInvoiceNos: used);
+            var form = facade.CreateForm(CreateTestEmployee(), "展示测试");
+            facade.AddExpense(form, ExpenseCategory.Meal, 800m, 0m, "无票餐饮");
+
+            var validation = facade.ValidateAll(form);
+
+            var text = validation.GetDisplayText();
+            Assert.NotEmpty(text);
+            Assert.Contains("校验结果", text);
+            Assert.Contains("错误", text);
+        }
+
+        [Fact]
+        public void ValidationResult_GetDisplayMessages_ShouldHaveIcons()
+        {
+            var facade = CreateFacade();
+            var form = facade.CreateForm(CreateTestEmployee());
+            facade.AddExpense(form, ExpenseCategory.Accommodation, 1500m, 0m, "无票住宿");
+
+            var validation = facade.ValidateInvoices(form);
+            var messages = validation.GetDisplayMessages();
+
+            Assert.NotEmpty(messages);
+            Assert.All(messages, m => Assert.Contains(m, new[] { "❌", "⚠️", "ℹ️" }));
+        }
+
+        [Fact]
+        public void ValidationResult_GetDisplayItems_ShouldProvideStructuredData()
+        {
+            var facade = CreateFacade();
+            var form = facade.CreateForm(CreateTestEmployee());
+            var item = facade.AddExpense(form, ExpenseCategory.Office, 1000m, 0m, "办公品");
+            facade.AddInvoice(item, "PART-001", InvoiceType.Electronic, 400m);
+
+            var validation = facade.ValidateInvoices(form);
+            var items = validation.GetDisplayItems();
+
+            Assert.NotEmpty(items);
+            Assert.All(items, it =>
+            {
+                Assert.NotEmpty(it.UserFriendlyText);
+                Assert.NotEmpty(it.SeverityIcon);
+                Assert.NotEmpty(it.SeverityText);
+            });
+        }
+
+        [Fact]
+        public void ValidationMessage_ToDisplayString_IncludesSuggestion()
+        {
+            var facade = CreateFacade();
+            var form = facade.CreateForm(CreateTestEmployee(EmployeeLevel.Junior));
+            var trip = facade.AddTrip(form, "北京", "北京市",
+                new DateTime(2026, 6, 1), new DateTime(2026, 6, 3), CityLevel.Tier1);
+            facade.AddExpense(form, ExpenseCategory.Accommodation, 5000m, tripId: trip.Id);
+
+            var validation = facade.ValidateStandard(form);
+            var warnings = validation.GetWarnings();
+
+            Assert.NotEmpty(warnings);
+            Assert.Contains(warnings, w => !string.IsNullOrWhiteSpace(w.Suggestion));
+            Assert.Contains(warnings, w => w.ToDisplayString().Contains("建议"));
+        }
+
+        [Fact]
+        public void ValidationResult_GetMessagesByCategory_GroupsCorrectly()
+        {
+            var facade = CreateFacade();
+            var form = facade.CreateForm(CreateTestEmployee());
+            facade.AddExpense(form, ExpenseCategory.Meal, 600m, 0m, "无票餐饮");
+            var trip = facade.AddTrip(form, "北京", "北京市",
+                new DateTime(2026, 6, 1), new DateTime(2026, 6, 3), CityLevel.Tier1);
+            facade.AddExpense(form, ExpenseCategory.Accommodation, 5000m, tripId: trip.Id);
+
+            var validation = facade.ValidateAll(form);
+            var grouped = validation.GetMessagesByCategory();
+
+            Assert.True(grouped.Count >= 2);
+            Assert.Contains(grouped.Keys, k => k.Contains("发票") || k.Contains("超标"));
+        }
+
+        [Fact]
+        public void QuickEndToEnd_AllFourRequirements_Covered()
+        {
+            var budgets = new List<Budget>
+            {
+                new Budget { DepartmentId = "DEPT1", Year = 2026, TotalBudget = 50000m, UsedBudget = 0 }
+            };
+            var facade = new ReimbursementFacade(budgets: budgets);
+            var emp = new Employee
+            {
+                Id = "E2E", Name = "端到端测试员",
+                DepartmentId = "DEPT1", DepartmentName = "测试部",
+                Level = EmployeeLevel.Manager
+            };
+
+            var form = facade.CreateForm(emp, "端到端验证", "差旅费");
+            var trip = facade.AddTrip(form, "广州", "广州市",
+                new DateTime(2026, 6, 10), new DateTime(2026, 6, 12),
+                CityLevel.Tier2, TransportationType.HighSpeedRail, TransportationType.HighSpeedRail,
+                "测试拜访");
+            var hotel = facade.AddExpense(form, ExpenseCategory.Accommodation,
+                1100m, 66m, "酒店2晚", tripId: trip.Id);
+            facade.AddInvoice(hotel, "E2E-HT-001", InvoiceType.VATSpecial,
+                1100m, 66m, sellerName: "酒店", isVerified: true);
+
+            var result = facade.ProcessFull(form);
+
+            Assert.NotNull(result);
+            Assert.NotNull(result.Validation);
+            Assert.NotEmpty(result.ApprovalSummary);
+            Assert.Contains("端到端测试员", result.ApprovalSummary);
+            Assert.NotEmpty(result.ChineseAmount);
+            Assert.Contains("元", result.ChineseAmount);
+            Assert.NotNull(result.PrintData);
+            Assert.NotEmpty(result.PrintData.TotalAmountChinese);
+            Assert.NotEmpty(result.DepartmentAllocation);
+            Assert.True(result.ApprovalNodes.Count >= 2);
+        }
     }
 }

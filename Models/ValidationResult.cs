@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
+using FinanceReimbursement.Utils;
 
 namespace FinanceReimbursement.Models
 {
@@ -24,6 +26,36 @@ namespace FinanceReimbursement.Models
         public string Suggestion { get; set; } = string.Empty;
 
         public DateTime Timestamp { get; set; } = DateTime.Now;
+
+        public string SeverityText => Severity.GetDescription();
+
+        public string SeverityIcon
+        {
+            get
+            {
+                switch (Severity)
+                {
+                    case ValidationSeverity.Error: return "❌";
+                    case ValidationSeverity.Warning: return "⚠️";
+                    default: return "ℹ️";
+                }
+            }
+        }
+
+        public string ToDisplayString()
+        {
+            var sb = new StringBuilder();
+            sb.Append($"{SeverityIcon} [{SeverityText}] {Message}");
+            if (ExpectedValue.HasValue && ActualValue.HasValue)
+            {
+                sb.Append($" (标准: {ExpectedValue.Value:N2}元, 实际: {ActualValue.Value:N2}元)");
+            }
+            if (!string.IsNullOrWhiteSpace(Suggestion))
+            {
+                sb.Append($" → 建议: {Suggestion}");
+            }
+            return sb.ToString();
+        }
     }
 
     public class ValidationResult
@@ -165,21 +197,101 @@ namespace FinanceReimbursement.Models
             return result;
         }
 
+        public List<ValidationMessage> GetInfos()
+        {
+            var result = new List<ValidationMessage>();
+            foreach (var msg in Messages)
+            {
+                if (msg.Severity == ValidationSeverity.Info) result.Add(msg);
+            }
+            return result;
+        }
+
         public List<string> GetDisplayMessages()
         {
             var result = new List<string>();
             foreach (var msg in Messages)
             {
-                string severity = msg.Severity == ValidationSeverity.Error ? "[错误]" :
-                                  msg.Severity == ValidationSeverity.Warning ? "[警告]" : "[提示]";
-                result.Add($"{severity} {msg.Message}");
+                result.Add(msg.ToDisplayString());
             }
             return result;
+        }
+
+        public string GetDisplayText()
+        {
+            if (Messages.Count == 0) return "✅ 校验通过，未发现问题。";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"校验结果: {(IsValid ? "✅ 基本通过" : "❌ 存在错误")}");
+            sb.AppendLine($"  错误: {ErrorCount} 个，警告: {WarningCount} 个，提示: {InfoCount} 个");
+            sb.AppendLine();
+            foreach (var msg in Messages)
+            {
+                sb.AppendLine("  " + msg.ToDisplayString());
+            }
+            return sb.ToString();
+        }
+
+        public List<ValidationDisplayItem> GetDisplayItems()
+        {
+            var items = new List<ValidationDisplayItem>();
+            foreach (var msg in Messages)
+            {
+                items.Add(new ValidationDisplayItem
+                {
+                    Code = msg.Code,
+                    Severity = msg.Severity,
+                    SeverityText = msg.SeverityText,
+                    SeverityIcon = msg.SeverityIcon,
+                    Category = msg.Category,
+                    Message = msg.Message,
+                    ExpectedValue = msg.ExpectedValue,
+                    ActualValue = msg.ActualValue,
+                    Suggestion = msg.Suggestion,
+                    UserFriendlyText = msg.ToDisplayString()
+                });
+            }
+            return items;
+        }
+
+        public Dictionary<string, List<ValidationMessage>> GetMessagesByCategory()
+        {
+            var dict = new Dictionary<string, List<ValidationMessage>>();
+            foreach (var msg in Messages)
+            {
+                string key = string.IsNullOrWhiteSpace(msg.Category) ? "其他" : msg.Category;
+                if (!dict.ContainsKey(key)) dict[key] = new List<ValidationMessage>();
+                dict[key].Add(msg);
+            }
+            return dict;
         }
 
         public void Merge(ValidationResult other)
         {
             Messages.AddRange(other.Messages);
         }
+    }
+
+    public class ValidationDisplayItem
+    {
+        public string Code { get; set; } = string.Empty;
+
+        public ValidationSeverity Severity { get; set; }
+
+        public string SeverityText { get; set; } = string.Empty;
+
+        public string SeverityIcon { get; set; } = string.Empty;
+
+        public string Category { get; set; } = string.Empty;
+
+        public string Message { get; set; } = string.Empty;
+
+        public decimal? ExpectedValue { get; set; }
+
+        public decimal? ActualValue { get; set; }
+
+        public string Suggestion { get; set; } = string.Empty;
+
+        public string UserFriendlyText { get; set; } = string.Empty;
     }
 }

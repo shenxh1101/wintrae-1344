@@ -5,8 +5,9 @@
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <Nullable>enable</Nullable>
     <LangVersion>8.0</LangVersion>
-    <RootNamespace>FinanceReimbursement.Tests</RootNamespace>
-    <AssemblyName>FinanceReimbursement.Demo</AssemblyName>
+    <RootNamespace>FinanceReimbursement.Runner</RootNamespace>
+    <AssemblyName>FinanceReimbursement.Examples</AssemblyName>
+    <Description>财务报销类库 - 快速接入示例程序</Description>
   </PropertyGroup>
 
   <ItemGroup>

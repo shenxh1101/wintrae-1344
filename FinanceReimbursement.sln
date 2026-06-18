@@ -7,7 +7,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FinanceReimbursement", "Fin
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FinanceReimbursement.Tests", "FinanceReimbursement.Tests\FinanceReimbursement.Tests.csproj", "{B2222222-2222-2222-2222-222222222222}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FinanceReimbursement.Demo", "FinanceReimbursement.Tests\FinanceReimbursement.Demo.csproj", "{C3333333-3333-3333-3333-333333333333}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FinanceReimbursement.Examples", "Examples\FinanceReimbursement.Examples.csproj", "{C3333333-3333-3333-3333-333333333333}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
